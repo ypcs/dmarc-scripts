@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 # -*- perl -*-
-# $Header: /home/johnl/hack/dmarc/RCS/rddmarc,v 1.5 2013/05/12 17:08:20 johnl Exp johnl $
+# $Header: /home/johnl/hack/dmarc/RCS/rddmarc,v 1.6 2016/05/01 21:43:40 johnl Exp $
 #
 # Script to read DMARC aggregate reports and put summary info
 # into a database
@@ -10,7 +10,7 @@
 # -x read XML files rather than mail messages
 # -r replace existing report rather than failing
 
-# Copyright 2012, Taughannock Networks. All rights reserved.
+# Copyright 2012, 2016, Taughannock Networks. All rights reserved.
 
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -50,7 +50,7 @@ use vars qw{$opt_d $opt_r $opt_x};
 getopts('drx');
 
 my $dbh = DBI->connect("DBI:mysql:database=dmarc",
-    			    "xxx", "xxx")
+    			    "dmarc", "in3ffective")
 	    or die "Cannot connect to database\n";
 
 foreach my $i (@ARGV) {
@@ -120,7 +120,7 @@ foreach my $i (@ARGV) {
     
     print "XML is ======\n$xml\n=====\n" if $opt_d;
 
-    my $ref = $xs->XMLin($xml);
+    my $ref = $xs->XMLin($xml, SuppressEmpty => '');
     my %xml = %{$ref};
     #print join "\n",keys %xml;
     #print "\n";
@@ -128,7 +128,14 @@ foreach my $i (@ARGV) {
     my $to = $xml{'report_metadata'}->{'date_range'}->{'end'};
     my $org = $xml{'report_metadata'}->{'org_name'};
     my $id = $xml{'report_metadata'}->{'report_id'};
+    my $email = $xml{'report_metadata'}->{'email'};
+    my $extra = $xml{'report_metadata'}->{'extra_contact_info'};	
     my $domain =  $xml{'policy_published'}->{'domain'};
+    my $policy_adkim = $xml{'policy_published'}->{'adkim'};
+    my $policy_aspf = $xml{'policy_published'}->{'aspf'};
+    my $policy_p = $xml{'policy_published'}->{'p'};
+    my $policy_sp = $xml{'policy_published'}->{'sp'};
+    my $policy_pct = $xml{'policy_published'}->{'pct'};
     print "report $org ($id) $from to $to for $domain\n" if $opt_d;
     # see if already stored
     my ($xorg, $xid, $serial) = $dbh->selectrow_array(qq{SELECT org,reportid,serial FROM report WHERE reportid=?}, undef, $id);
@@ -143,12 +150,12 @@ foreach my $i (@ARGV) {
 	}
     }
 
-    my $sql = qq{INSERT INTO report(serial,mindate,maxdate,domain,org,reportid)
-		VALUES(NULL,FROM_UNIXTIME(?),FROM_UNIXTIME(?),?,?,?)};
-    $sql = qq{REPLACE INTO report(serial,mindate,maxdate,domain,org,reportid)
-		VALUES('$serial',FROM_UNIXTIME(?),FROM_UNIXTIME(?),?,?,?)} if $xorg;
+    my $sql = qq{INSERT INTO report(serial,mindate,maxdate,domain,org,reportid,email,extra_contact_info,policy_adkim,policy_aspf,policy_p,policy_sp,policy_pct)
+		VALUES(NULL,FROM_UNIXTIME(?),FROM_UNIXTIME(?),?,?,?,?,?,?,?,?,?,?)};
+    $sql = qq{REPLACE INTO report(serial,mindate,maxdate,domain,org,reportid,email,extra_contact_info,policy_adkim,policy_aspf,policy_p,policy_sp,policy_pct)
+		VALUES('$serial',FROM_UNIXTIME(?),FROM_UNIXTIME(?),?,?,?,?,?,?,?,?,?,?)} if $xorg;
 
-    $dbh->do($sql, undef, $from, $to, $domain, $org, $id)
+    $dbh->do($sql, undef, $from, $to, $domain, $org, $id, $email, $extra, $policy_adkim, $policy_aspf, $policy_p, $policy_sp, $policy_pct)
 	    or die "cannot make report" . $dbh->errstr;
     $serial = $dbh->{'mysql_insertid'} ||  $dbh->{'insertid'} unless $xorg;
     print " serial $serial ";
@@ -160,6 +167,11 @@ foreach my $i (@ARGV) {
 	my $ip = $r{'row'}->{'source_ip'};
 	my $count = $r{'row'}->{'count'};
 	my $disp = $r{'row'}->{'policy_evaluated'}->{'disposition'};
+	my $dkim_align = $r{'row'}->{'policy_evaluated'}->{'dkim'};
+	my $spf_align = $r{'row'}->{'policy_evaluated'}->{'spf'};
+
+	my $identifier_hfrom = $r{'identifiers'}->{'header_from'};
+	
 	print "\nip $ip, count $count, disp $disp" if $opt_d;
 	my ($dkim, $dkimresult, $spf, $spfresult, $reason);
 	my $rp = $r{'auth_results'}->{'dkim'};
@@ -203,9 +215,9 @@ foreach my $i (@ARGV) {
 	    print "??? mystery ip $ip\n";
 	    next;
 	}
-	print "$iptype = $ipval\n" if $opt_d;
-	$dbh->do(qq{INSERT INTO rptrecord(serial,$iptype,rcount,disposition,reason,dkimdomain,dkimresult,spfdomain,spfresult)
-		  VALUES(?,$ipval,?,?,?,?,?,?,?)},undef, $serial,$count,$disp,$reason,$dkim,$dkimresult,$spf,$spfresult)
+	print "$iptype = $ipval, spf $spf_align, dkim $dkim_align\n" if $opt_d;
+	$dbh->do(qq{INSERT INTO rptrecord(serial,$iptype,rcount,disposition,spf_align,dkim_align,reason,dkimdomain,dkimresult,spfdomain,spfresult,identifier_hfrom)
+		  VALUES(?,$ipval,?,?,?,?,?,?,?,?,?,?)},undef, $serial,$count,$disp,$spf_align,$dkim_align,$reason,$dkim,$dkimresult,$spf,$spfresult,$identifier_hfrom)
 		or die "cannot insert record " . $dbh->{'mysql_error'};
     } # dorow
 
@@ -221,4 +233,3 @@ foreach my $i (@ARGV) {
 	print "mystery type " . ref($record) . "\n";
     }
 }
-

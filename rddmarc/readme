@@ -27,7 +27,12 @@ file names on the command line, or if no arguments, it reads stdin. It
 needs the usual MySQLdb module.  It handles reports from Netease,
 which are currently the only ones I'm getting.
 
+UPDATE: Thanks to John Bieling for some updates to rddmarc to
+log the policy_published and policy_evaluated fields
+
 mkdmarc - SQL to create the tables
+
+mkdmarc-update - SQL to add new policy fields to the old schema
 
 rddmarc - the script to parse summary reports (Perl)
 
